@@ -1,4 +1,7 @@
 from baidupcs_py.baidupcs import BaiduPCSApi
+from baidu_share_compat import install_share_compat
+
+install_share_compat()
 from baidupcs_py.baidupcs.errors import BaiduPCSError
 from loguru import logger
 import json
