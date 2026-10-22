@@ -1,5 +1,16 @@
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from loguru import logger
+
+
+def share_url_with_pwd(url, pwd=None):
+    if not pwd:
+        return url
+    parsed = urlsplit(url)
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != 'pwd']
+    query.append(('pwd', str(pwd)))
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
 
 def generate_transfer_notification(tasks_results):
     """生成转存通知内容"""
@@ -14,6 +25,7 @@ def generate_transfer_notification(tasks_results):
             
             if transferred_files:  # 只有在有新文件时才添加到通知
                 content.append(f"✅《{task_name}》添加追更：")
+                content.append(f'链接：{share_url_with_pwd(task["url"], task.get("pwd"))}')
                 
                 # 按目录分组文件
                 files_by_dir = {}
@@ -56,9 +68,10 @@ def generate_transfer_notification(tasks_results):
                 content.append(f"❌《{task_name}》：分享链接已失效")
             else:
                 content.append(f"❌《{task_name}》：{error_msg}")
+            content.append(f'链接：{share_url_with_pwd(task["url"], task.get("pwd"))}')
             content.append("")  # 添加空行分隔任务
         
         return "\n".join(content)
     except Exception as e:
         logger.error(f"生成通知内容失败: {str(e)}")
-        return "生成通知内容失败" 
+        return "生成通知内容失败"

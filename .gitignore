@@ -8,6 +8,7 @@ __pycache__/
 
 # 配置文件
 /config/config.json
+/config/wechat/
 config/config*.json
 git-config
 

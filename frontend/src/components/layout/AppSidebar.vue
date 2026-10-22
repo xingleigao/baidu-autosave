@@ -109,20 +109,6 @@
           </div>
         </div>
         
-        <!-- 快捷操作 -->
-        <div class="quick-actions">
-          <el-tooltip content="添加任务" :disabled="!isCollapsed">
-            <el-button
-              type="primary"
-              :icon="Plus"
-              :class="{ 'collapsed-btn': isCollapsed }"
-              @click="showAddTaskDialog"
-            >
-              <span v-if="!isCollapsed">添加任务</span>
-            </el-button>
-          </el-tooltip>
-        </div>
-        
         <!-- 版本信息 -->
         <div v-if="!isCollapsed" class="version-section">
           <div class="version-item" @click="handleVersionCheck">
@@ -152,14 +138,7 @@ import { useTaskStore, useUserStore, useVersionStore } from '@/stores'
 import { usePolling } from '@/composables/usePolling'
 import { APP_VERSION } from '@/config/version'
 import { appStorage } from '@/utils/storage'
-import { Plus, Odometer, List, User, Setting, Download } from '@element-plus/icons-vue'
-
-// Props & Emits
-interface Emits {
-  (e: 'add-task'): void
-}
-
-const emit = defineEmits<Emits>()
+import { Odometer, List, User, Setting, Download } from '@element-plus/icons-vue'
 
 // Composables
 const router = useRouter()
@@ -203,10 +182,6 @@ const toggleCollapse = () => {
 
 const handleMenuSelect = (index: string) => {
   router.push(index)
-}
-
-const showAddTaskDialog = () => {
-  emit('add-task')
 }
 
 // 初始化
@@ -407,20 +382,6 @@ onMounted(() => {
 
 .quota-progress {
   margin-top: 4px;
-}
-
-.quick-actions {
-  margin-bottom: 16px;
-}
-
-.quick-actions .el-button {
-  width: 100%;
-  height: 36px;
-}
-
-.collapsed-btn {
-  width: 36px !important;
-  padding: 0 !important;
 }
 
 .version-section {

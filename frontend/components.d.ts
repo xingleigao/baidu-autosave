@@ -47,6 +47,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     TaskRunnerDialog: typeof import('./src/components/business/TaskRunnerDialog.vue')['default']
+    WechatGatewaySettings: typeof import('./src/components/business/WechatGatewaySettings.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

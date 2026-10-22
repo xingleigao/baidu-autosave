@@ -31,7 +31,7 @@ def api_retry(max_retries=1, delay_range=(2, 3), exclude_errors=None):
         exclude_errors: 不需要重试的错误码列表
     """
     if exclude_errors is None:
-        exclude_errors = [-6, 115, 145, 200025, -9]  # 身份验证失败、分享链接失效、提取码错误、文件不存在
+        exclude_errors = [-7, -6, 115, 145, 200025, -9]  # 分享已删除/取消、身份验证失败、分享链接失效、提取码错误、文件不存在
 
     def decorator(func):
         @wraps(func)
@@ -86,6 +86,9 @@ class BaiduStorage:
         self._user_info_cache = None
         self._user_info_cache_time = 0
         self._cache_ttl = 30  # 缓存有效期（秒）
+        from media import MediaService
+        self.media_service = MediaService(self)
+        self._share_scan_lock = Lock()
         
     def _load_config(self):
         try:
@@ -1195,6 +1198,12 @@ class BaiduStorage:
             return True, file_path
 
     def transfer_share(self, share_url, pwd=None, new_files=None, save_dir=None, progress_callback=None, task_config=None):
+        with self.media_service.lock:
+            if task_config and task_config.get('task_uid') and not self.get_task_by_uid(task_config['task_uid']):
+                return {'success': False, 'error': '任务已删除，取消转存'}
+            return self._transfer_share(share_url, pwd, new_files, save_dir, progress_callback, task_config)
+
+    def _transfer_share(self, share_url, pwd=None, new_files=None, save_dir=None, progress_callback=None, task_config=None):
         """转存分享文件
         Args:
             share_url: 分享链接
@@ -1288,6 +1297,18 @@ class BaiduStorage:
                 logger.info(f"共记录 {len(shared_files_info)} 个共享文件")
                 if progress_callback:
                     progress_callback('info', f'获取到 {len(shared_files_info)} 个共享文件')
+
+                if task_config and 'media' in task_config:
+                    from media import VIDEO_EXTENSIONS
+                    from season_rules import build_season_rule
+
+                    season_rule = build_season_rule(shared_files_info, VIDEO_EXTENSIONS)
+                    excluded_paths = set(season_rule['excluded_paths'])
+                    shared_files_info = [entry for entry in shared_files_info if entry['path'] not in excluded_paths]
+                    task_config['media']['season_rule'] = season_rule
+                    self._save_config(update_scheduler=False)
+                    if progress_callback:
+                        progress_callback('info', f'季数筛选：{season_rule["description"]}')
                 
                 # 步骤2：扫描本地目录中的文件
                 logger.info(f"【步骤2/4】扫描本地目录: {save_dir}")
@@ -1819,54 +1840,35 @@ class BaiduStorage:
         return client.list_shared_paths(path, uk, share_id, bdstoken, page=page, size=size)
 
     def list_shared_files(self, share_url, pwd=None):
-        """获取分享链接中的文件列表"""
-        try:
-            logger.info(f"开始获取分享链接 {share_url} 的文件列表")
-            if pwd:
-                logger.info(f"使用密码 {pwd} 访问分享链接")
-                
-            logger.debug("开始访问分享链接...")
-            self._access_shared_with_retry(share_url, pwd)
-            logger.debug("分享链接访问成功")
-
-            logger.debug("开始获取文件列表...")
-            # 获取根目录文件列表
-            files = self._shared_paths_with_retry(shared_url=share_url)
-            
-            # 用于存储所有文件
+        """完整递归读取分享文件，分页或子目录失败时不返回部分结果。"""
+        with self._share_scan_lock:
+            user = self.config['baidu'].get('current_user')
+            user_info = self.config['baidu'].get('users', {}).get(user, {})
+            if not user_info.get('cookies'):
+                raise ValueError('请先配置百度网盘账号')
+            client = BaiduPCSApi(cookies=self._parse_cookies(user_info['cookies']))
+            self._access_shared_with_retry(share_url, pwd, client=client)
+            roots = self._shared_paths_with_retry(shared_url=share_url, client=client)
             all_files = []
-            
-            def get_folder_contents():
-                """递归获取文件夹内容"""
-                for file in files:
-                    if hasattr(file, 'is_dir') and file.is_dir:
-                        logger.debug(f"进入文件夹: {file.path}")
-                        try:
-                            # 递归获取子目录内容
-                            sub_files = self._list_shared_paths_with_retry(
-                                file.path,
-                                file.uk,
-                                file.share_id,
-                                file.bdstoken,
-                                page=1,
-                                size=100
-                            )
-                            all_files.extend(sub_files)
-                        except Exception as e:
-                            logger.error(f"获取文件夹 {file.path} 内容失败: {str(e)}")
-                    else:
-                        all_files.append(file)
-                        
-            # 执行递归获取
-            get_folder_contents()
-            logger.info(f"共找到 {len(all_files)} 个文件")
+            visited = set()
+            pending = list(roots)
+            while pending:
+                entry = pending.pop()
+                if not entry.is_dir:
+                    all_files.append(entry)
+                    continue
+                if entry.path in visited:
+                    continue
+                visited.add(entry.path)
+                page = 1
+                while True:
+                    children = self._list_shared_paths_with_retry(
+                        entry.path, entry.uk, entry.share_id, entry.bdstoken, page=page, size=100, client=client)
+                    pending.extend(children)
+                    if len(children) < 100:
+                        break
+                    page += 1
             return all_files
-
-        except Exception as e:
-            logger.error(f"获取分享文件列表失败: {str(e)}")
-            logger.error(f"异常类型: {type(e)}")
-            logger.error("异常详情:", exc_info=True)
-            raise
 
     def update_task_status(self, task_url, status, message=None, error=None, transferred_files=None):
         """更新任务状态

@@ -19,6 +19,7 @@ import requests
 # 原先的 print 函数和主线程的锁
 _print = print
 mutex = threading.Lock()
+access_token = ''
 
 
 # 定义新的 print 函数
@@ -87,6 +88,11 @@ push_config = {
     'QYWX_AM': '',                      # 企业微信应用
 
     'QYWX_KEY': '',                     # 企业微信机器人
+
+    'WxAppID': '',                      # 微信公众平台appid
+    'WxappSecret': '',                  # appSecret
+    'WxopenId': '',                     # openId
+    'Wxtemplate_id' : '',               # template_id
 
     'TG_BOT_TOKEN': '',                 # tg 机器人的 TG_BOT_TOKEN，例：1407203283:AAG9rt-6RDaaX0HBLZQq0laNOh898iFYaRQ
     'TG_USER_ID': '',                   # tg 机器人的 TG_USER_ID，例：1434078534
@@ -213,6 +219,76 @@ def dingding_bot(title: str, content: str) -> None:
         print("钉钉机器人 推送成功！")
     else:
         print("钉钉机器人 推送失败！")
+
+def get_access_token(appID, appSecret):
+    # 获取access token的url
+    url = 'https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={}&secret={}' \
+        .format(appID.strip(), appSecret.strip())
+    response = requests.get(url).json()
+    access_token = response.get('access_token')
+    return access_token
+
+def send_message(access_token, message_template_id, openId, message):
+    message = message.split("\n")
+    processed_list = []
+    for item in message:
+        # 只要长度大于 20，就不断截取前 20 个字符
+        temp_str = str(item)
+        while len(temp_str) > 20:
+            processed_list.append(temp_str[:20])
+            temp_str = temp_str[20:]
+        # 添加剩余的部分（或原长度就不够 20 的部分）
+        if temp_str:
+            processed_list.append(temp_str)
+    message = processed_list
+    body = {
+        "touser": openId,
+        "template_id": message_template_id.strip(),
+        "url": "https://weixin.qq.com",
+        "data": {
+        }
+    }
+    if len(message) > 8:
+        print("message size > 8 !!!!")
+        message = message[:8]
+    for i in range(len(message)):
+        body["data"][f"message{i}"] = {"value": f"{message[i]}"}
+    url = 'https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={}'.format(access_token)
+    return requests.post(url, json.dumps(body)).json()
+
+def wechat_bot(title: str, content: str) -> None:
+    """
+    通过 微信公众号平台 推送消息。
+    """
+    global access_token
+    if not push_config.get("WxAppID") or not push_config.get("WxappSecret") \
+        or not push_config.get("WxopenId") or not push_config.get("Wxtemplate_id"):
+        print("微信公众号平台 服务的 WxAppID 、 WxappSecret 、 WxopenId 、 Wxtemplate_id 未设置!!\n取消推送")
+        return
+    open_ids = list(dict.fromkeys(
+        open_id.strip() for open_id in push_config["WxopenId"].split(';') if open_id.strip()
+    ))
+    if not open_ids:
+        print("微信公众号平台未设置有效的接收人 OpenID，取消推送")
+        return
+    print("微信公众号平台 服务启动")
+    for recipient_index, open_id in enumerate(open_ids, 1):
+        try:
+            if not access_token:
+                access_token = get_access_token(push_config.get("WxAppID"), push_config.get("WxappSecret"))
+            for attempt in range(2):
+                response = send_message(access_token, push_config.get("Wxtemplate_id"), open_id, content)
+                if response["errcode"] == 0:
+                    print(f"微信公众号平台接收人 {recipient_index} 推送成功！")
+                    break
+                if response["errcode"] == 42001 and attempt == 0:
+                    print("access_token超时, 申请新token...")
+                    access_token = get_access_token(push_config.get("WxAppID"), push_config.get("WxappSecret"))
+                    continue
+                print(f"微信公众号平台接收人 {recipient_index} 推送失败，错误码：{response['errcode']}")
+                break
+        except Exception as error:
+            print(f"微信公众号平台接收人 {recipient_index} 推送失败：{type(error).__name__}")
 
 
 def feishu_bot(title: str, content: str) -> None:
@@ -718,7 +794,7 @@ def smtp(title: str, content: str) -> None:
         smtp_server.close()
         print("SMTP 邮件 推送成功！")
     except Exception as e:
-        print(f"SMTP 邮件 推送失败！{e}")
+        print(f"SMTP 邮ä¨送失败！{e}")
 
 
 def pushme(title: str, content: str) -> None:
@@ -738,7 +814,7 @@ def pushme(title: str, content: str) -> None:
     data = {
         "push_key": push_config.get("PUSHME_KEY"),
         "title": title,
-        "content": content,
+        "ent": content,
         "date": push_config.get("date") if push_config.get("date") else "",
         "type": push_config.get("type") if push_config.get("type") else "",
     }
@@ -753,7 +829,7 @@ def pushme(title: str, content: str) -> None:
 def chronocat(title: str, content: str) -> None:
     """
     使用 CHRONOCAT 推送消息。
-    """
+  """
     if (
         not push_config.get("CHRONOCAT_URL")
         or not push_config.get("CHRONOCAT_QQ")
@@ -810,7 +886,7 @@ def ntfy(title: str, content: str) -> None:
         return f'=?utf-8?B?{encoded_str}?='
 
     if not push_config.get("NTFY_TOPIC"):
-        print("ntfy 服务的 NTFY_TOPIC 未设置!!\n取消推送")
+        print("ntfy 服务的 NTFY_n取消推送")
         return
     print("ntfy 服务启动")
     priority = '3'
@@ -943,6 +1019,8 @@ def add_notify_function():
         notify_function.append(bark)
     if push_config.get("CONSOLE"):
         notify_function.append(console)
+    if push_config.get("WxAppID") and push_config.get("WxappSecret") and push_config.get("WxopenId") and push_config.get("Wxtemplate_id"):
+        notify_function.append(wechat_bot)
     if push_config.get("DD_BOT_TOKEN") and push_config.get("DD_BOT_SECRET"):
         notify_function.append(dingding_bot)
     if push_config.get("FSKEY"):
@@ -1036,7 +1114,6 @@ def send(title: str, content: str, ignore_default_config: bool = False, **kwargs
 
 def main():
     send("title", "content")
-
 
 if __name__ == "__main__":
     main()

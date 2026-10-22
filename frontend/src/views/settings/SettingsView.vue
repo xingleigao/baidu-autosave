@@ -6,6 +6,9 @@
 
     <div class="settings-content">
       <el-tabs v-model="activeTab" class="settings-tabs">
+        <el-tab-pane label="微信网关" name="wechat">
+          <WechatGatewaySettings />
+        </el-tab-pane>
         <!-- 通知设置 -->
         <el-tab-pane label="通知设置" name="notification">
           <el-card>
@@ -49,6 +52,7 @@
                     <el-dropdown-menu>
                       <el-dropdown-item command="pushplus">Push Plus 配置</el-dropdown-item>
                       <el-dropdown-item command="webhook">Webhook 配置</el-dropdown-item>
+                      <el-dropdown-item command="wechat_official">微信公众号配置</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -559,6 +563,7 @@ import { Plus, Delete, User, ArrowDown } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useConfigStore, useVersionStore, useAuthStore } from '@/stores'
 import { APP_VERSION, BUILD_TIME, RELEASE_NOTES } from '@/config/version'
+import WechatGatewaySettings from '@/components/business/WechatGatewaySettings.vue'
 
 const configStore = useConfigStore()
 const versionStore = useVersionStore()
@@ -644,6 +649,12 @@ const newField = reactive({
 
 // 字段模板
 const fieldTemplates = {
+  wechat_official: [
+    { name: 'WxAppID', value: '', description: '微信公众号 AppID' },
+    { name: 'WxappSecret', value: '', description: '微信公众号 AppSecret' },
+    { name: 'WxopenId', value: '', description: '接收人 OpenID，多个用英文分号 ; 分隔' },
+    { name: 'Wxtemplate_id', value: '', description: '消息模板 ID' }
+  ],
   pushplus: [
     { name: 'PUSH_PLUS_TOKEN', value: '', description: 'Push Plus Token' },
     { name: 'PUSH_PLUS_USER', value: '', description: 'Push Plus 用户标识' }
@@ -698,7 +709,7 @@ const handleQuickAdd = (command: string) => {
     }
   })
   
-  ElMessage.success(`已添加 ${command === 'pushplus' ? 'Push Plus' : 'Webhook'} 配置字段`)
+  ElMessage.success(`已添加 ${command === 'pushplus' ? 'Push Plus' : command === 'wechat_official' ? '微信公众号' : 'Webhook'} 配置字段`)
 }
 
 // 添加通知字段
@@ -743,7 +754,7 @@ const updateFieldValue = (name: string, value: string) => {
 }
 
 const isSecretField = (name: string): boolean => {
-  return name.includes('TOKEN') || name.includes('PASSWORD')
+  return /token|password|secret/i.test(name)
 }
 
 // 获取字段占位符
@@ -763,6 +774,10 @@ const getFieldPlaceholder = (name: string): string => {
 // 获取字段说明
 const getFieldDescription = (name: string): string => {
   const descriptions: Record<string, string> = {
+    'WxAppID': '原微信公众号通知渠道，与微信 ClawBot 登录独立。需在上方启用通知并保存。',
+    'WxappSecret': '微信公众号 AppSecret，不是微信网关的应用令牌。',
+    'WxopenId': '关注该公众号的接收人 OpenID，多个用英文分号 ; 分隔，例如 openid1;openid2。不是 ClawBot 的本人标识。',
+    'Wxtemplate_id': '原微信公众号通知所使用的模板 ID，需与公众号权限及模板内容匹配。',
     'WEBHOOK_HEADERS': '每行一个头部，格式: Header-Name: Header-Value',
     'WEBHOOK_BODY': '支持变量：$title（标题）, $content（内容）'
   }

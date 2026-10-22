@@ -17,6 +17,8 @@ import time
 import socket
 import threading
 import queue
+import hmac
+from seedhub import SeedHubError, failure_details
 
 from gevent.pywsgi import WSGIServer
 
@@ -239,7 +241,16 @@ def init_app():
         logger.info("开始初始化应用...")
         # 初始化存储
         logger.info("正在初始化存储...")
+        previous_gateway = getattr(storage, 'wechat_gateway', None)
+        if previous_gateway:
+            previous_gateway.close()
         storage = BaiduStorage()
+        try:
+            from wechat_gateway import WeChatGateway
+            storage.wechat_gateway = WeChatGateway(storage, _start_media_transfer)
+            storage.wechat_gateway.start()
+        except Exception as error:
+            logger.warning(f'微信网关初始化失败: {type(error).__name__}')
         
         # 使用已创建的 storage 实例初始化调度器
         try:
@@ -265,6 +276,9 @@ def init_app():
 def cleanup():
     """清理资源"""
     global scheduler
+    gateway = getattr(storage, 'wechat_gateway', None)
+    if gateway:
+        gateway.close()
     if scheduler:
         try:
             if hasattr(scheduler, 'is_running') and scheduler.is_running:
@@ -752,7 +766,7 @@ def execute_task():
                     
                     try:
                         # 发送转存成功通知
-                        notify_send('百度自动追更', generate_transfer_notification(task_results))
+                        storage.media_service.notify('百度自动追更', generate_transfer_notification(task_results))
                     except Exception as e:
                         logger.error(f"发送转存成功通知失败: {str(e)}")
                     
@@ -1093,6 +1107,7 @@ def update_config():
     data = request.get_json()
     
     # 处理通知配置：完全替换notify配置，清除旧字段
+    notify_updated = 'notify' in data
     if 'notify' in data:
         # 格式化WEBHOOK_BODY字段
         if 'direct_fields' in data['notify'] and 'WEBHOOK_BODY' in data['notify']['direct_fields']:
@@ -1157,7 +1172,7 @@ def update_config():
             })
     
     # 处理通知配置更新
-    if scheduler and 'notify' in data:
+    if scheduler and notify_updated:
         try:
             # 重新初始化通知配置
             scheduler._init_notify()
@@ -1343,7 +1358,7 @@ def execute_all_tasks():
     if results['success'] or results['failed']:
         try:
             notification_content = generate_transfer_notification(results)
-            notify_send("百度网盘自动追更", notification_content)
+            storage.media_service.notify("百度网盘自动追更", notification_content)
         except Exception as e:
             logger.error(f"发送通知失败: {str(e)}")
     
@@ -2117,6 +2132,96 @@ def update_share_config():
     
     return jsonify({'success': True, 'message': '分享配置已更新'})
 
+@app.route('/api/media/search', methods=['POST'])
+@login_required
+def media_search():
+    try:
+        return jsonify(success=True, **storage.media_service.search((request.get_json(silent=True) or {}).get('name')))
+    except SeedHubError as error:
+        return jsonify(success=False, message=str(error)), 502
+    except (ValueError, TypeError) as error:
+        return jsonify(success=False, message=str(error)), 400
+    except Exception as error:
+        logger.warning(f'影片搜索失败: {type(error).__name__}')
+        return jsonify(success=False, message='影片搜索失败，请检查搜索源和网络'), 502
+
+
+@app.route('/api/media/subscribe', methods=['POST'])
+@login_required
+def media_subscribe():
+    try:
+        data = request.get_json(silent=True) or {}
+        schedule = data.get('schedule', data.get('cron'))
+        result = (storage.media_service.subscribe(data.get('id'), schedule=schedule) if schedule is not None
+                  else storage.media_service.subscribe(data.get('id')))
+        _start_media_transfer(result)
+        return jsonify(success=True, **result)
+    except SeedHubError as error:
+        return jsonify(success=False, message=str(error)), 502
+    except (ValueError, TypeError) as error:
+        return jsonify(success=False, message=str(error)), 400
+    except Exception as error:
+        logger.warning(f'影片订阅失败: {failure_details(error)}')
+        return jsonify(success=False, message='影片订阅失败，请查看服务日志'), 502
+
+
+def _start_media_transfer(result):
+    if result.get('existing') or not scheduler:
+        logger.info(f'跳过首次转存: existing={result.get("existing")}, scheduler_available={bool(scheduler)}')
+        return
+    task = storage.get_task_by_uid(result['task']['task_uid'])
+    if task:
+        logger.info(f'启动首次转存线程: task_uid={task.get("task_uid")}, name={task.get("name")}, save_dir={task.get("save_dir")}')
+        threading.Thread(target=scheduler._execute_single_task, args=(task,), daemon=True).start()
+    else:
+        logger.error(f'首次转存失败：创建任务后找不到任务: task_uid={result["task"].get("task_uid")}')
+
+
+@app.route('/api/media/settings', methods=['GET', 'POST'])
+@login_required
+def media_settings():
+    try:
+        settings = (storage.media_service.settings() if request.method == 'GET' else
+                    storage.media_service.set_settings(request.get_json(silent=True)))
+        return jsonify(success=True, settings=settings)
+    except (ValueError, TypeError, KeyError) as error:
+        return jsonify(success=False, message=str(error)), 400
+
+
+@app.route('/api/clawbot/message', methods=['POST'])
+def clawbot_message():
+    if not storage:
+        return jsonify(success=False, message='存储未初始化'), 503
+    settings = storage.config.get('clawbot', {})
+    token = settings.get('api_token', '')
+    if not settings.get('enabled') or not token:
+        return jsonify(success=False, message='ClawBot 未启用'), 403
+    authorization = request.headers.get('Authorization', '')
+    if not hmac.compare_digest(authorization.encode(), ('Bearer ' + token).encode()):
+        return jsonify(success=False, message='身份验证失败'), 401
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(success=False, message='请求必须为 JSON 对象'), 400
+    try:
+        text = data.get('text', '')
+        result = storage.media_service.command(text)
+        if isinstance(text, str) and text.strip().partition(' ')[0] in ('追剧', '获取影片'):
+            _start_media_transfer(result)
+        return jsonify(success=True, result=result)
+    except SeedHubError as error:
+        return jsonify(success=False, message=str(error)), 502
+    except (ValueError, TypeError, KeyError) as error:
+        return jsonify(success=False, message=str(error)), 400
+    except Exception as error:
+        logger.warning(f'ClawBot 命令失败: {type(error).__name__}')
+        return jsonify(success=False, message='命令执行失败，请查看服务日志'), 502
+
+
+from wechat_api import create_wechat_blueprint
+
+app.register_blueprint(create_wechat_blueprint(lambda: storage, login_required))
+
+
 if __name__ == '__main__':
     try:
         # 启动时初始化应用
@@ -2145,4 +2250,4 @@ if __name__ == '__main__':
         try:
             signal_handler(signal.SIGTERM, None)
         except:
-            sys.exit(1) 
+            sys.exit(1)

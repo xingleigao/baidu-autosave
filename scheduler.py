@@ -63,6 +63,7 @@ class TaskScheduler:
         try:
             # 清除现有的任务调度
             self.scheduler.remove_all_jobs()
+            self._add_media_maintenance_job()
             
             # 获取任务列表
             tasks = self.storage.list_tasks()
@@ -106,6 +107,7 @@ class TaskScheduler:
         try:
             if not self.scheduler:
                 self._init_scheduler()
+            self._add_media_maintenance_job()
             
             # 直接启动调度器，因为任务已经在_init_scheduler中添加
             self.scheduler.start()
@@ -118,6 +120,11 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"启动调度器失败: {str(e)}")
             raise
+
+    def _add_media_maintenance_job(self):
+        self.scheduler.add_job(
+            self.storage.media_service.maintain, 'interval', hours=1,
+            id='media_share_maintenance', replace_existing=True, max_instances=1)
 
     def _init_scheduler(self):
         """初始化调度器"""
@@ -703,7 +710,7 @@ class TaskScheduler:
                 notification_content = generate_transfer_notification(self._notification_buffer)
                 if notification_content.strip():  # 只在有内容时发送通知
                     logger.info(f"准备发送汇总通知:\n{notification_content}")
-                    notify_send("百度网盘自动追更", notification_content)
+                    self.storage.media_service.notify("百度网盘自动追更", notification_content)
                     logger.info(f"通知发送成功，共 {len(self._notification_buffer['success'])} 个成功任务，{len(self._notification_buffer['failed'])} 个失败任务")
                 else:
                     logger.warning("生成的通知内容为空，跳过发送")
@@ -1040,4 +1047,4 @@ def main():
         scheduler.update_default_schedule(args.cron)
 
 if __name__ == '__main__':
-    main() 
+    main()

@@ -4,6 +4,26 @@
         "current_user": null,
         "tasks": []
     },
+    "media": {
+        "base_url": "https://sidhub.cc",
+        "cleanup_enabled": true,
+        "settings": {
+            "save_dir": "/追剧",
+            "cron": "0 */6 * * *",
+            "max_results": 5,
+            "max_links": 18
+        }
+    },
+    "clawbot": {
+        "enabled": false,
+        "api_token": "",
+        "gateway_url": "http://127.0.0.1:18789",
+        "hook_token": "",
+        "agent_id": "main",
+        "channel": "",
+        "account_id": "",
+        "to": ""
+    },
     "retry": {
         "max_attempts": 3,
         "delay_seconds": 5
@@ -19,7 +39,11 @@
         "notification_delay": 30,
         "direct_fields": {
             "PUSH_PLUS_TOKEN": "",
-            "PUSH_PLUS_USER": ""
+            "PUSH_PLUS_USER": "",
+            "WxAppID": "",
+            "WxappSecret": "",
+            "WxopenId": "",
+            "Wxtemplate_id": ""
         }
     },
     "scheduler": {
@@ -53,4 +77,4 @@
         "password": "admin123",
         "session_timeout": 3600
     }
-} 
+}

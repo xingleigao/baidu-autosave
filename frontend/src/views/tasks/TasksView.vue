@@ -2,12 +2,6 @@
   <div class="tasks-view">
     <div class="page-header">
       <h1 class="page-title">任务管理</h1>
-      <div class="header-actions">
-        <el-button type="primary" @click="addTask">
-          <el-icon><Plus /></el-icon>
-          添加任务
-        </el-button>
-      </div>
     </div>
 
     <!-- 工具栏 -->
@@ -55,6 +49,10 @@
       </div>
       
       <div class="toolbar-right">
+        <el-button type="primary" @click="addTask">
+          <el-icon><Plus /></el-icon>
+          添加任务
+        </el-button>
         <el-button-group v-if="selectedTasks.length > 0">
           <el-button @click="executeBatchTasks">
             <el-icon><VideoPlay /></el-icon>
@@ -1287,7 +1285,7 @@ watch([searchQuery, statusFilter, categoryFilter, isReversed], async () => {
   }
   
   /* 移动端表头按钮优化 */
-  .header-actions .el-button {
+  .toolbar-right > .el-button {
     min-height: 44px;
     padding: 12px 16px;
   }

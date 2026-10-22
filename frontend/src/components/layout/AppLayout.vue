@@ -4,7 +4,6 @@
     <template v-if="!isMobile">
       <!-- 侧边栏 -->
       <AppSidebar
-        @add-task="handleAddTask"
         @collapse="handleSidebarCollapse"
       />
       
